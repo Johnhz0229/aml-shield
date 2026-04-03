@@ -48,7 +48,7 @@ class AgentResult:
 
 
 class AMLAgent:
-    MODEL = "claude-sonnet-4-20250514"
+    MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
     MAX_ITERATIONS = 10
     MAX_TOKENS = 4096
 
