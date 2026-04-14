@@ -23,6 +23,7 @@ def list_cases(
         summaries.append(
             CaseSummary(
                 transaction_id=row["transaction_id"],
+                routing=row.get("routing"),
                 final_decision=row["decision"],
                 risk_score=row["risk_score"],
                 analyzed_at=datetime.fromisoformat(row["analyzed_at"]),

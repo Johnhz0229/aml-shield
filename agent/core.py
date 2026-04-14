@@ -58,9 +58,16 @@ class AMLAgent:
             raise ValueError("ANTHROPIC_API_KEY environment variable not set")
         self.client = anthropic.Anthropic(api_key=key)
 
-    def analyze(self, transaction: dict) -> AgentResult:
+    def analyze(self, transaction: dict, ml_context: Optional[dict] = None) -> AgentResult:
         """
-        Run the ReAct agent loop to analyze a transaction for AML risk.
+        Run the ReAct agent loop to investigate a medium-risk transaction.
+
+        Args:
+            transaction: raw transaction fields
+            ml_context:  pre-computed ML triage result (score, shap, routing_reason).
+                         When provided the agent skips re-scoring and focuses on
+                         network/regulatory investigation and final decision.
+
         Returns a fully populated AgentResult with reasoning chain and final decision.
         """
         start_ms = time.time()
@@ -78,7 +85,7 @@ class AMLAgent:
         messages = [
             {
                 "role": "user",
-                "content": self._format_transaction_prompt(transaction),
+                "content": self._format_transaction_prompt(transaction, ml_context),
             }
         ]
 
@@ -199,23 +206,68 @@ class AMLAgent:
             error=error,
         )
 
-    def _format_transaction_prompt(self, tx: dict) -> str:
-        """Format transaction as a clean markdown table for the agent."""
-        lines = ["## Transaction Under Review", ""]
-        lines.append("| Field | Value |")
-        lines.append("|-------|-------|")
+    def _format_transaction_prompt(self, tx: dict, ml_context: Optional[dict] = None) -> str:
+        """Format transaction prompt, prepending ML triage context when available."""
+        lines = []
+
+        # ── ML pre-screening block (shown first so agent uses it as baseline) ──
+        if ml_context:
+            score     = ml_context.get("score", "N/A")
+            level     = ml_context.get("risk_level", "UNKNOWN")
+            reason    = ml_context.get("routing_reason", "")
+            lo        = ml_context.get("low_threshold", 25)
+            hi        = ml_context.get("high_threshold", 75)
+            shap_list = ml_context.get("shap_attributions", [])
+
+            lines += [
+                "## ML Pre-Screening Result",
+                "",
+                f"**ML Score:** {score:.1f} / 100  ({level})",
+                f"**Routing:** AGENT_REVIEW — {reason}",
+                f"**Thresholds:** AUTO_CLEAR < {lo} | AGENT_REVIEW [{lo}, {hi}) | AUTO_SAR ≥ {hi}",
+                "",
+            ]
+
+            if shap_list:
+                lines += [
+                    "**Top ML Risk Factors (SHAP attributions):**",
+                    "",
+                    "| Feature | Value | Direction |",
+                    "|---------|-------|-----------|",
+                ]
+                for attr in shap_list[:6]:
+                    feat = attr.get("feature", "")
+                    val  = attr.get("value", "")
+                    shap = attr.get("shap", 0)
+                    direction = attr.get("direction", "")
+                    lines.append(f"| {feat} | {val} | {shap:+.3f} ({direction}) |")
+                lines.append("")
+
+            lines += [
+                "---",
+                "",
+                "**Your task:** The ML model flagged this transaction as medium-risk.",
+                "Do NOT call `transaction_risk_scorer` — the score above is already computed.",
+                "Investigate using `entity_network_analyzer` and `regulatory_rule_checker`,",
+                "then issue a final decision with `case_escalation_decider`.",
+                "",
+            ]
+
+        # ── Transaction details ────────────────────────────────────────────────
+        lines += ["## Transaction Under Review", ""]
+        lines += ["| Field | Value |", "|-------|-------|"]
 
         field_labels = {
-            "transaction_id": "Transaction ID",
-            "amount": "Amount (EUR)",
-            "transaction_type": "Transaction Type",
-            "sender_account": "Sender Account",
-            "receiver_account": "Receiver Account",
-            "sender_country": "Sender Country",
-            "receiver_country": "Receiver Country",
+            "transaction_id":  "Transaction ID",
+            "amount":          "Amount (EUR)",
+            "transaction_type":"Transaction Type",
+            "sender_account":  "Sender Account",
+            "receiver_account":"Receiver Account",
+            "sender_country":  "Sender Country",
+            "receiver_country":"Receiver Country",
             "is_cross_border": "Cross-Border",
-            "timestamp": "Timestamp",
-            "reference": "Reference",
+            "timestamp":       "Timestamp",
+            "reference":       "Reference",
         }
 
         for key, label in field_labels.items():
@@ -225,8 +277,7 @@ class AMLAgent:
                     value = f"€{float(value):,.2f}"
                 lines.append(f"| {label} | {value} |")
 
-        lines.append("")
-        lines.append("Begin your analysis. Follow the ReAct protocol.")
+        lines += ["", "Begin your investigation. Follow the ReAct protocol."]
         return "\n".join(lines)
 
 
