@@ -25,26 +25,47 @@ class TransactionInput(BaseModel):
     reference: str = ""
 
     def model_post_init(self, __context):
-        # Normalize country codes to uppercase
         object.__setattr__(self, "sender_country", self.sender_country.upper())
         object.__setattr__(self, "receiver_country", self.receiver_country.upper())
 
 
-class AgentResponse(BaseModel):
+class AnalysisResponse(BaseModel):
+    """Unified response for all three routing tiers."""
+
     transaction_id: str
+
+    # ── ML triage layer ────────────────────────────────────────────────────────
+    routing: str            # AUTO_CLEAR | AGENT_REVIEW | AUTO_SAR
+    ml_score: float
+    ml_risk_level: str
+    ml_routing_reason: str
+    shap_attributions: list[dict]
+    model_version: str
+
+    # ── Final decision ─────────────────────────────────────────────────────────
+    # AUTO_CLEAR  → CLEAR
+    # AUTO_SAR    → SAR_REQUIRED
+    # AGENT_REVIEW → whatever the agent decides
     final_decision: str
-    risk_score: Optional[float]
-    reasoning_chain: list[dict]
-    tool_calls_count: int
-    total_tokens: int
+
+    # ── Agent output (only populated for AGENT_REVIEW) ─────────────────────────
+    reasoning_chain: list[dict] = Field(default_factory=list)
+    tool_calls_count: int = 0
+    total_tokens: int = 0
+    sar_report: Optional[dict] = None
+
     duration_ms: int
-    sar_report: Optional[dict]
-    error: Optional[str]
+    error: Optional[str] = None
 
 
 class CaseSummary(BaseModel):
     transaction_id: str
+    routing: Optional[str] = None
     final_decision: str
     risk_score: Optional[float]
     analyzed_at: datetime
     duration_ms: int
+
+
+# Legacy alias — kept for any code that still imports AgentResponse
+AgentResponse = AnalysisResponse

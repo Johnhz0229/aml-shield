@@ -16,32 +16,44 @@ def _connect() -> sqlite3.Connection:
 
 
 def init_db():
-    """Create the cases table if it does not exist."""
+    """Create the cases table and run any pending migrations."""
     with _connect() as conn:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS cases (
                 transaction_id TEXT PRIMARY KEY,
-                decision TEXT NOT NULL,
-                risk_score REAL,
-                result_json TEXT NOT NULL,
-                analyzed_at TEXT NOT NULL
+                decision       TEXT NOT NULL,
+                routing        TEXT,
+                risk_score     REAL,
+                result_json    TEXT NOT NULL,
+                analyzed_at    TEXT NOT NULL
             )
         """)
+        # Migration: add routing column to existing databases that lack it
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(cases)")}
+        if "routing" not in cols:
+            conn.execute("ALTER TABLE cases ADD COLUMN routing TEXT")
         conn.commit()
 
 
-def save_case(transaction_id: str, decision: str, risk_score: Optional[float], result: dict):
+def save_case(
+    transaction_id: str,
+    decision: str,
+    risk_score: Optional[float],
+    result: dict,
+    routing: Optional[str] = None,
+):
     """Insert or replace a case result."""
     with _connect() as conn:
         conn.execute(
             """
             INSERT OR REPLACE INTO cases
-                (transaction_id, decision, risk_score, result_json, analyzed_at)
-            VALUES (?, ?, ?, ?, ?)
+                (transaction_id, decision, routing, risk_score, result_json, analyzed_at)
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
             (
                 transaction_id,
                 decision,
+                routing,
                 risk_score,
                 json.dumps(result),
                 datetime.now(timezone.utc).isoformat(),
